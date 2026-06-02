@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // --- JSON-RPC types ---
@@ -33,8 +34,45 @@ type RPCError struct {
 
 // --- helpers ---
 
+// parseISO parses common ISO 8601 date formats.
+func parseISO(s string) (time.Time, error) {
+	for _, layout := range []string{
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid date format: %s (expected ISO 8601)", s)
+}
+
+// appleDate builds a locale-safe AppleScript date expression from a Go time.
+// Uses "my" so the handler resolves from top-level scope inside "tell application" blocks.
+func appleDate(t time.Time) string {
+	return fmt.Sprintf(
+		"(my buildDate(%d, %d, %d, %d, %d, %d))",
+		t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(),
+	)
+}
+
+const dateHelper = `
+on buildDate(y, m, d, h, min, s)
+	set dd to current date
+	set year of dd to y
+	set month of dd to m
+	set day of dd to d
+	set hours of dd to h
+	set minutes of dd to min
+	set seconds of dd to s
+	return dd
+end buildDate
+` + "\n"
+
 func runAppleScript(script string) (string, error) {
-	cmd := exec.Command("osascript", "-e", script)
+	full := dateHelper + script
+	cmd := exec.Command("osascript", "-e", full)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
@@ -221,18 +259,27 @@ end tell
 }
 
 func listEvents(args map[string]interface{}) (string, error) {
-	start, _ := args["start"].(string)
-	end, _ := args["end"].(string)
-	if start == "" || end == "" {
+	startStr, _ := args["start"].(string)
+	endStr, _ := args["end"].(string)
+	if startStr == "" || endStr == "" {
 		return "", fmt.Errorf("start and end are required")
+	}
+
+	startT, err := parseISO(startStr)
+	if err != nil {
+		return "", err
+	}
+	endT, err := parseISO(endStr)
+	if err != nil {
+		return "", err
 	}
 
 	calName, _ := args["calendar"].(string)
 
 	script := `
 tell application "Calendar"
-	set lo to date "` + start + `"
-	set hi to date "` + end + `"
+	set lo to ` + appleDate(startT) + `
+	set hi to ` + appleDate(endT) + `
 	set output to ""
 `
 
@@ -304,19 +351,28 @@ end tell
 
 func createEvent(args map[string]interface{}) (string, error) {
 	title, _ := args["title"].(string)
-	start, _ := args["start"].(string)
-	end, _ := args["end"].(string)
+	startStr, _ := args["start"].(string)
+	endStr, _ := args["end"].(string)
 	calName, _ := args["calendar"].(string)
 
-	if title == "" || start == "" || end == "" || calName == "" {
+	if title == "" || startStr == "" || endStr == "" || calName == "" {
 		return "", fmt.Errorf("title, start, end, and calendar are required")
+	}
+
+	startT, err := parseISO(startStr)
+	if err != nil {
+		return "", err
+	}
+	endT, err := parseISO(endStr)
+	if err != nil {
+		return "", err
 	}
 
 	script := `
 tell application "Calendar"
 	set cal to calendar "` + calName + `"
-	set startD to date "` + start + `"
-	set endD to date "` + end + `"
+	set startD to ` + appleDate(startT) + `
+	set endD to ` + appleDate(endT) + `
 	set newEvt to make new event at end of events of cal with properties {summary:"` + title + `", start date:startD, end date:endD}
 	set eStart to start date of newEvt as «class isot»
 	set eEnd to end date of newEvt as «class isot»
