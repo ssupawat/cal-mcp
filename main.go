@@ -70,7 +70,7 @@ on buildDate(y, m, d, h, min, s)
 end buildDate
 ` + "\n"
 
-func runAppleScript(script string) (string, error) {
+var runAppleScript = func(script string) (string, error) {
 	full := dateHelper + script
 	cmd := exec.Command("osascript", "-e", full)
 	out, err := cmd.CombinedOutput()
@@ -186,6 +186,21 @@ func toolDefs() []map[string]interface{} {
 				"required": []string{"uid"},
 			},
 		},
+		{
+			"name":        "update-event",
+			"description": "Update an existing calendar event by UID. Only specified fields will be changed.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"uid":      prop("Event UID to update", "string"),
+					"title":    prop("New event title (optional)", "string"),
+					"start":    prop("New start date/time in ISO 8601 (optional)", "string"),
+					"end":      prop("New end date/time in ISO 8601 (optional)", "string"),
+					"calendar": prop("New calendar name to move the event to (optional)", "string"),
+				},
+				"required": []string{"uid"},
+			},
+		},
 	}
 }
 
@@ -216,6 +231,8 @@ func handleToolCall(req Request) *Response {
 		result, err = createEvent(p.Arguments)
 	case "delete-event":
 		result, err = deleteEvent(p.Arguments)
+	case "update-event":
+		result, err = updateEvent(p.Arguments)
 	default:
 		return &Response{
 			JSONRPC: "2.0", ID: req.ID,
@@ -432,6 +449,117 @@ end tell
 	b, _ := json.Marshal(map[string]interface{}{
 		"deleted": deleted,
 		"uid":     uid,
+	})
+	return string(b), nil
+}
+
+func updateEvent(args map[string]interface{}) (string, error) {
+	uid, _ := args["uid"].(string)
+	if uid == "" {
+		return "", fmt.Errorf("uid is required")
+	}
+
+	title, hasTitle := args["title"].(string)
+	startStr, hasStart := args["start"].(string)
+	endStr, hasEnd := args["end"].(string)
+	calName, hasCal := args["calendar"].(string)
+
+	var startExpr, endExpr string
+	if hasStart && startStr != "" {
+		startT, err := parseISO(startStr)
+		if err != nil {
+			return "", err
+		}
+		startExpr = appleDate(startT)
+	}
+	if hasEnd && endStr != "" {
+		endT, err := parseISO(endStr)
+		if err != nil {
+			return "", err
+		}
+		endExpr = appleDate(endT)
+	}
+
+	script := `
+tell application "Calendar"
+	set targetUid to "` + uid + `"
+	set found to false
+	set outCal to ""
+	set outSummary to ""
+	set outStart to ""
+	set outEnd to ""
+	repeat with c in calendars
+		try
+			set evts to (every event of c whose uid is targetUid)
+			repeat with e in evts
+				set outSummary to summary of e
+				set outStart to start date of e as «class isot»
+				set outEnd to end date of e as «class isot»
+				set outCal to name of c
+				set found to true
+`
+
+	if hasTitle && title != "" {
+		script += `
+				set summary of e to "` + title + `"
+				set outSummary to "` + title + `"
+`
+	}
+	if hasStart && startExpr != "" {
+		script += `
+				set startD to ` + startExpr + `
+				set start date of e to startD
+				set outStart to startD as «class isot»
+`
+	}
+	if hasEnd && endExpr != "" {
+		script += `
+				set endD to ` + endExpr + `
+				set end date of e to endD
+				set outEnd to endD as «class isot»
+`
+	}
+	if hasCal && calName != "" {
+		script += `
+				if name of c is not "` + calName + `" then
+					move e to end of events of calendar "` + calName + `"
+					set outCal to "` + calName + `"
+				end if
+`
+	}
+
+	script += `
+			end repeat
+		end try
+	end repeat
+	if found then
+		return "true" & "|" & outCal & "|" & outSummary & "|" & outStart & "|" & outEnd
+	else
+		return "false"
+	end if
+end tell
+`
+
+	out, err := runAppleScript(script)
+	if err != nil {
+		return "", err
+	}
+
+	if out == "false" {
+		return "", fmt.Errorf("event with UID %s not found", uid)
+	}
+
+	parts := strings.SplitN(out, "|", 5)
+	if len(parts) < 5 {
+		return "", fmt.Errorf("unexpected response: %s", out)
+	}
+
+	b, _ := json.Marshal(map[string]string{
+		"uid":       uid,
+		"calendar":  parts[1],
+		"summary":   parts[2],
+		"startDate": parts[3],
+		"endDate":   parts[4],
 	})
 	return string(b), nil
 }
