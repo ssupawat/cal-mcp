@@ -7,13 +7,10 @@ import (
 )
 
 func TestListCalendarsMock(t *testing.T) {
-	// Save the original function
 	orig := runAppleScript
 	defer func() { runAppleScript = orig }()
 
-	// Set mock function
 	runAppleScript = func(script string) (string, error) {
-		// Verify the script contains expected content
 		if !strings.Contains(script, "calendars") {
 			t.Errorf("expected script to contain calendars, got: %s", script)
 		}
@@ -45,15 +42,12 @@ func TestUpdateEventMock(t *testing.T) {
 	orig := runAppleScript
 	defer func() { runAppleScript = orig }()
 
-	// Case 1: missing UID
 	_, err := updateEvent(map[string]interface{}{})
 	if err == nil || !strings.Contains(err.Error(), "uid is required") {
 		t.Errorf("expected error for missing uid, got: %v", err)
 	}
 
-	// Case 2: successful update with all parameters
 	runAppleScript = func(script string) (string, error) {
-		// Verify the script contains the update statements
 		expectedContents := []string{
 			"set targetUid to \"12345\"",
 			"set summary of e to \"New Title\"",

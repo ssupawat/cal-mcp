@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-// --- JSON-RPC types ---
-
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -32,9 +30,6 @@ type RPCError struct {
 	Message string `json:"message"`
 }
 
-// --- helpers ---
-
-// parseISO parses common ISO 8601 date formats.
 func parseISO(s string) (time.Time, error) {
 	for _, layout := range []string{
 		"2006-01-02T15:04:05Z07:00",
@@ -48,8 +43,7 @@ func parseISO(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid date format: %s (expected ISO 8601)", s)
 }
 
-// appleDate builds a locale-safe AppleScript date expression from a Go time.
-// Uses "my" so the handler resolves from top-level scope inside "tell application" blocks.
+// appleDate uses "my" so the handler resolves from top-level scope inside "tell application" blocks.
 func appleDate(t time.Time) string {
 	return fmt.Sprintf(
 		"(my buildDate(%d, %d, %d, %d, %d, %d))",
@@ -97,8 +91,6 @@ func errorResult(msg string) interface{} {
 	}
 }
 
-// --- MCP protocol ---
-
 func handleRequest(req Request) *Response {
 	if req.ID == nil {
 		return nil
@@ -131,8 +123,6 @@ func handleRequest(req Request) *Response {
 		}
 	}
 }
-
-// --- Tool definitions ---
 
 func toolDefs() []map[string]interface{} {
 	prop := func(desc, typ string) map[string]interface{} {
@@ -204,8 +194,6 @@ func toolDefs() []map[string]interface{} {
 	}
 }
 
-// --- Tool dispatch ---
-
 type toolParams struct {
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments"`
@@ -245,8 +233,6 @@ func handleToolCall(req Request) *Response {
 	}
 	return &Response{JSONRPC: "2.0", ID: req.ID, Result: textResult(result)}
 }
-
-// --- Tool implementations (AppleScript) ---
 
 func listCalendars() (string, error) {
 	script := `
@@ -563,8 +549,6 @@ end tell
 	})
 	return string(b), nil
 }
-
-// --- Main loop ---
 
 func main() {
 	log.SetPrefix("cal-mcp: ")
